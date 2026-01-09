@@ -97,6 +97,10 @@ let mouseDownRight = false;
 let prevMouseDownLeft = false;
 let prevMouseDownRight = false;
 
+// Zmienne dla menu PPM
+let menuTower = null;
+let menuPos = {x: 0, y: 0};
+
 // =========================
 // KLASY
 // =========================
@@ -220,7 +224,7 @@ class Tower {
         ctx.stroke();
 
         if (showRange) {
-            ctx.strokeStyle = "rgba(255,255,255,0.5)";
+            ctx.strokeStyle = "rgba(255,255,255,0.3)";
             ctx.lineWidth = 1;
             ctx.beginPath();
             ctx.arc(this.x, this.y, this.range, 0, Math.PI * 2);
@@ -329,9 +333,8 @@ function update(dt) {
         const hoveredTower = find_tower_at(mouseX, mouseY);
         for (const t of towers) {
             const shot = t.attack(enemies);
-            t._hovered = (t === hoveredTower);
+            t._hovered = (t === hoveredTower || t === menuTower);
             if (shot) {
-                // zapisujemy strzał do narysowania w draw()
                 if (!t._shots) t._shots = [];
                 t._shots.push(shot);
             }
@@ -347,11 +350,39 @@ function update(dt) {
 }
 
 function handleMouseActions() {
-    // kliknięcie LPM (nowe)
     const clickLeft = mouseDownLeft && !prevMouseDownLeft;
     const clickRight = mouseDownRight && !prevMouseDownRight;
 
     if (!clickLeft && !clickRight) return;
+
+    // Obsługa Menu Contextowego (LPM na opcje)
+    if (menuTower && clickLeft) {
+        const sellRect = {x: menuPos.x, y: menuPos.y, w: 120, h: 30};
+        const upgRect = {x: menuPos.x, y: menuPos.y + 30, w: 120, h: 30};
+
+        if (mouseX >= sellRect.x && mouseX <= sellRect.x + sellRect.w && 
+            mouseY >= sellRect.y && mouseY <= sellRect.y + sellRect.h) {
+            money += 50;
+            towers = towers.filter(t => t !== menuTower);
+            menuTower = null;
+            return;
+        } else if (mouseX >= upgRect.x && mouseX <= upgRect.x + upgRect.w && 
+                   mouseY >= upgRect.y && mouseY <= upgRect.y + upgRect.h) {
+            if (!menuTower.can_upgrade()) {
+                showMessage("Maksymalny poziom!");
+            } else if (money < menuTower.upgrade_cost) {
+                showMessage("Za mało kasy na upgrade!");
+            } else {
+                money -= menuTower.upgrade_cost;
+                menuTower.upgrade();
+                showMessage(`Wieża ulepszona do poziomu ${menuTower.level}`);
+            }
+            menuTower = null;
+            return;
+        } else {
+            menuTower = null; // Zamknij jeśli kliknięto gdzie indziej
+        }
+    }
 
     // panel wież
     if (mouseY > HEIGHT - 100) {
@@ -367,41 +398,32 @@ function handleMouseActions() {
     if (clickLeft) {
         // stawianie wieży
         const cfg = TOWER_TYPES[selectedType];
-
         if (money < cfg.cost) {
             showMessage("Za mało kasy!");
             return;
         }
-
         if (is_on_road(mouseX, mouseY)) {
             showMessage("Nie można stawiać na drodze!");
             return;
         }
-
         for (const t of towers) {
             if (Math.hypot(t.x - mouseX, t.y - mouseY) < 40) {
                 showMessage("Za blisko innej wieży!");
                 return;
             }
         }
-
         towers.push(new Tower(mouseX, mouseY, cfg));
         money -= cfg.cost;
     }
 
     if (clickRight) {
-        // upgrade wieży
+        // Otwieranie menu PPM
         const t = find_tower_at(mouseX, mouseY);
         if (t) {
-            if (!t.can_upgrade()) {
-                showMessage("Maksymalny poziom!");
-            } else if (money < t.upgrade_cost) {
-                showMessage("Za mało kasy na upgrade!");
-            } else {
-                money -= t.upgrade_cost;
-                t.upgrade();
-                showMessage(`Wieża ulepszona do poziomu ${t.level}`);
-            }
+            menuTower = t;
+            menuPos = {x: mouseX, y: mouseY};
+        } else {
+            menuTower = null;
         }
     }
 }
@@ -415,11 +437,9 @@ function showMessage(text) {
 // RYSOWANIE
 // =========================
 function draw() {
-    // tło
     ctx.fillStyle = GRASS;
     ctx.fillRect(0, 0, WIDTH, HEIGHT);
 
-    // droga
     ctx.strokeStyle = ROAD_COLOR;
     ctx.lineWidth = 60;
     ctx.lineCap = "round";
@@ -430,12 +450,8 @@ function draw() {
     }
     ctx.stroke();
 
-    // przeciwnicy
-    for (const e of enemies) {
-        e.draw(ctx);
-    }
+    for (const e of enemies) { e.draw(ctx); }
 
-    // wieże + strzały
     for (const t of towers) {
         if (t._shots) {
             ctx.strokeStyle = WHITE;
@@ -451,10 +467,26 @@ function draw() {
         t.draw(ctx, t._hovered);
     }
 
-    // panel dolny
+    // Rysowanie Menu Kontextowego
+    if (menuTower && !gameOver) {
+        ctx.fillStyle = GRAY;
+        ctx.fillRect(menuPos.x, menuPos.y, 120, 60);
+        ctx.strokeStyle = WHITE;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(menuPos.x, menuPos.y, 120, 60);
+        ctx.beginPath();
+        ctx.moveTo(menuPos.x, menuPos.y + 30);
+        ctx.lineTo(menuPos.x + 120, menuPos.y + 30);
+        ctx.stroke();
+
+        ctx.fillStyle = WHITE;
+        ctx.font = "14px Consolas";
+        ctx.fillText("SELL (50)", menuPos.x + 5, menuPos.y + 8);
+        ctx.fillText(`UPG (${menuTower.upgrade_cost})`, menuPos.x + 5, menuPos.y + 38);
+    }
+
     ctx.fillStyle = BLACK;
     ctx.fillRect(0, HEIGHT - 100, WIDTH, 100);
-
     ctx.font = "20px Consolas";
     ctx.textBaseline = "top";
 
@@ -462,30 +494,18 @@ function draw() {
         const cfg = TOWER_TYPES[i];
         const x = i * 160 + 10;
         const y = HEIGHT - 90;
-
         ctx.fillStyle = (i === selectedType) ? "#646464" : "#3C3C3C";
         ctx.fillRect(x, y, 150, 80);
-
         ctx.fillStyle = cfg.color;
-        ctx.beginPath();
-        ctx.arc(x + 25, y + 25, 12, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.fillStyle = WHITE;
-        ctx.fillText(cfg.name, x + 50, y + 10);
-        ctx.fillStyle = YELLOW;
-        ctx.fillText("$" + cfg.cost, x + 50, y + 40);
+        ctx.beginPath(); ctx.arc(x + 25, y + 25, 12, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = WHITE; ctx.fillText(cfg.name, x + 50, y + 10);
+        ctx.fillStyle = YELLOW; ctx.fillText("$" + cfg.cost, x + 50, y + 40);
     }
 
-    // HUD
-    ctx.fillStyle = YELLOW;
-    ctx.fillText("Kasa: $" + money, 20, 20);
-    ctx.fillStyle = RED;
-    ctx.fillText("Życia: " + lives, 20, 50);
-    ctx.fillStyle = WHITE;
-    ctx.fillText("Fala: " + wave, 20, 80);
+    ctx.fillStyle = YELLOW; ctx.fillText("Kasa: $" + money, 20, 20);
+    ctx.fillStyle = RED; ctx.fillText("Życia: " + lives, 20, 50);
+    ctx.fillStyle = WHITE; ctx.fillText("Fala: " + wave, 20, 80);
 
-    // komunikat
     if (msgTimer > 0) {
         ctx.fillStyle = WHITE;
         const text = message;
@@ -494,42 +514,19 @@ function draw() {
         msgTimer -= 1;
     }
 
-    // game over
     if (gameOver) {
         ctx.fillStyle = "rgba(0,0,0,0.7)";
         ctx.fillRect(0, 0, WIDTH, HEIGHT);
-
-        ctx.fillStyle = RED;
-        ctx.font = "40px Consolas";
-        const go = "GAME OVER";
-        let w = ctx.measureText(go).width;
-        ctx.fillText(go, WIDTH / 2 - w / 2, HEIGHT / 2 - 60);
-
-        ctx.fillStyle = YELLOW;
-        ctx.font = "24px Consolas";
-        const waveInfo = "Dotarłeś do fali: " + wave;
-        w = ctx.measureText(waveInfo).width;
-        ctx.fillText(waveInfo, WIDTH / 2 - w / 2, HEIGHT / 2);
-
-        const info = "Odśwież stronę, aby zagrać ponownie";
-        w = ctx.measureText(info).width;
-        ctx.fillText(info, WIDTH / 2 - w / 2, HEIGHT / 2 + 40);
+        ctx.fillStyle = RED; ctx.font = "40px Consolas";
+        ctx.fillText("GAME OVER", WIDTH / 2 - ctx.measureText("GAME OVER").width / 2, HEIGHT / 2 - 60);
     }
 }
 
-// =========================
-// PĘTLA GRY
-// =========================
 function gameLoop(timestamp) {
     const dt = timestamp - lastTime;
     lastTime = timestamp;
-
     update(dt);
     draw();
-
-    if (running) {
-        requestAnimationFrame(gameLoop);
-    }
+    if (running) { requestAnimationFrame(gameLoop); }
 }
-
 requestAnimationFrame(gameLoop);
